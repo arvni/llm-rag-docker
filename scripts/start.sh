@@ -40,7 +40,7 @@ check_prerequisites() {
     fi
     
     # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
+    if ! command -v docker compose &> /dev/null; then
         print_error "Docker Compose is not installed!"
         exit 1
     fi
@@ -93,11 +93,11 @@ start_services() {
     
     # Pull latest images
     print_status "Pulling latest images..."
-    docker-compose pull
+    docker compose pull
     
     # Build and start services
     print_status "Building and starting containers..."
-    docker-compose up --build -d
+    docker compose up --build -d
     
     # Wait for services to be ready
     print_status "Waiting for services to start..."
@@ -105,7 +105,7 @@ start_services() {
     
     # Check service status
     print_status "Checking service status..."
-    docker-compose ps
+    docker compose ps
 }
 
 # Install default models
@@ -117,7 +117,7 @@ install_models() {
     attempt=0
     
     while [ $attempt -lt $max_attempts ]; do
-        if docker-compose exec -T ollama ollama list > /dev/null 2>&1; then
+        if docker compose exec -T ollama ollama list > /dev/null 2>&1; then
             print_success "Ollama is ready"
             break
         fi
@@ -134,10 +134,10 @@ install_models() {
     
     # Install default model
     print_status "Installing Llama 3.1 8B model..."
-    docker-compose exec -T ollama ollama pull llama3.1:8b
+    docker compose exec -T ollama ollama pull llama3.1:8b
     
     print_status "Installing Mistral 7B model..."
-    docker-compose exec -T ollama ollama pull mistral:7b
+    docker compose exec -T ollama ollama pull mistral:7b
 }
 
 # Display access information
