@@ -1,0 +1,489 @@
+version: '3.8'
+
+services:
+  # Ollama LLM Service with GPU Acceleration
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    hostname: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./models:/models:rw
+      - ./config/ollama:/etc/ollama:ro
+      - ./logs/ollama:/var/log/ollama:rw
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_DEBUG=${OLLAMA_DEBUG:-0}
+      - OLLAMA_VERBOSE=${OLLAMA_VERBOSE:-0}
+      - OLLAMA_LOAD_TIMEOUT=300
+      - OLLAMA_REQUEST_TIMEOUT=300
+    deploy:
+      resources:
+        limits:
+          memory: 14G
+        reservations:
+          memory: 8G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags", "||", "exit", "1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=ollama"
+      - "com.rag-system.component=llm-backend"
+      - "com.rag-system.version=1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # RAG Application with Streamlit Frontend
+  rag-app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+        - STREAMLIT_VERSION=1.28.1
+    image: rag-system/app:latest
+    container_name: rag-app
+    hostname: rag-app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data:rw
+      - ./uploads:/app/uploads:rw
+      - ./logs/app:/app/logs:rw
+      - ./config/app:/app/config:ro
+      - /tmp:/tmp:rw
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+      - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=false
+      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-500}
+      - STREAMLIT_SERVER_ENABLE_STATIC_SERVING=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - OLLAMA_URL=http://ollama:11434
+      - VECTOR_DB_PATH=/app/data/chroma_db
+      - UPLOAD_PATH=/app/uploads
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://raguser:${POSTGRES_PASSWORD:-ragpass123}@postgres:5432/ragdb
+      - CUDA_VISIBLE_DEVICES=0
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: '4'
+        reservations:
+          memory: 2G
+          cpus: '2'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=rag-app"
+      - "com.rag-system.component=frontend"
+      - "com.rag-system.version=1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # PostgreSQL Database for Metadata and Chat History
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:rw
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./logs/postgres:/var/log/postgresql:rw
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-ragdb}
+      - POSTGRES_USER=${POSTGRES_USER:-raguser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ragpass123}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=trust
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_HOST_AUTH_METHOD=scram-sha-256
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser} -d ${POSTGRES_DB:-ragdb}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=postgres"
+      - "com.rag-system.component=database"
+      - "com.rag-system.version=15"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # Redis Cache for Session Management and Caching
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data:rw
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./logs/redis:/var/log/redis:rw
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DATABASES=16
+      - REDIS_MAXMEMORY=1gb
+      - REDIS_MAXMEMORY_POLICY=allkeys-lru
+    command: >
+      redis-server /usr/local/etc/redis/redis.conf
+      --requirepass "${REDIS_PASSWORD:-}"
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=redis"
+      - "com.rag-system.component=cache"
+      - "com.rag-system.version=7"
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "3"
+
+  # Nginx Reverse Proxy with Load Balancing
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    hostname: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx:rw
+      - nginx_cache:/var/cache/nginx:rw
+    environment:
+      - NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates
+      - NGINX_ENVSUBST_TEMPLATE_SUFFIX=.template
+      - NGINX_WORKER_PROCESSES=auto
+      - NGINX_WORKER_CONNECTIONS=1024
+    depends_on:
+      rag-app:
+        condition: service_healthy
+      filebrowser:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=nginx"
+      - "com.rag-system.component=proxy"
+      - "com.rag-system.version=1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # File Browser for Upload Management
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser
+    hostname: filebrowser
+    ports:
+      - "8080:80"
+    volumes:
+      - ./uploads:/srv/uploads:rw
+      - ./data:/srv/data:rw
+      - ./backups:/srv/backups:rw
+      - ./logs:/srv/logs:ro
+      - ./config/filebrowser/filebrowser.json:/.filebrowser.json:ro
+      - filebrowser_data:/database:rw
+    environment:
+      - FB_BASEURL=/
+      - FB_DATABASE=/database/filebrowser.db
+      - FB_ROOT=/srv
+      - FB_USERNAME=${FILEBROWSER_USERNAME:-admin}
+      - FB_PASSWORD=${FILEBROWSER_PASSWORD:-admin}
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=filebrowser"
+      - "com.rag-system.component=filemanager"
+      - "com.rag-system.version=1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "3"
+
+  # Watchtower for Automatic Updates (Optional)
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    hostname: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/watchtower:/config:ro
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_REMOVE_VOLUMES=false
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *  # 4 AM daily
+      - WATCHTOWER_NOTIFICATIONS_LEVEL=info
+      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_WEBHOOK_URL:-}
+      - TZ=${TZ:-UTC}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 32M
+          cpus: '0.1'
+    restart: unless-stopped
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=watchtower"
+      - "com.rag-system.component=updater"
+      - "com.rag-system.version=1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "2"
+    profiles:
+      - auto-update
+
+  # System Health Checker Service
+  healthchecker:
+    image: alpine:latest
+    container_name: healthchecker
+    hostname: healthchecker
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./logs/health:/var/log:rw
+    environment:
+      - CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-300}  # 5 minutes
+      - WEBHOOK_URL=${HEALTH_WEBHOOK_URL:-}
+      - TZ=${TZ:-UTC}
+    command: >
+      sh -c "
+        apk add --no-cache curl jq &&
+        while true; do
+          /scripts/health-check.sh >> /var/log/health.log 2>&1;
+          sleep ${CHECK_INTERVAL:-300};
+        done
+      "
+    depends_on:
+      - ollama
+      - rag-app
+      - postgres
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+        reservations:
+          memory: 16M
+          cpus: '0.05'
+    restart: unless-stopped
+    networks:
+      - rag-network
+    labels:
+      - "com.rag-system.service=healthchecker"
+      - "com.rag-system.component=monitoring"
+      - "com.rag-system.version=1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "2"
+    profiles:
+      - monitoring
+
+# Named Volumes for Data Persistence
+volumes:
+  # Ollama models and configuration
+  ollama_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/ollama
+    labels:
+      - "com.rag-system.volume=ollama-data"
+      - "com.rag-system.backup=true"
+
+  # PostgreSQL database
+  postgres_data:
+    driver: local
+    labels:
+      - "com.rag-system.volume=postgres-data"
+      - "com.rag-system.backup=true"
+
+  # Redis cache data
+  redis_data:
+    driver: local
+    labels:
+      - "com.rag-system.volume=redis-data"
+      - "com.rag-system.backup=false"
+
+  # Nginx cache
+  nginx_cache:
+    driver: local
+    labels:
+      - "com.rag-system.volume=nginx-cache"
+      - "com.rag-system.backup=false"
+
+  # File browser database
+  filebrowser_data:
+    driver: local
+    labels:
+      - "com.rag-system.volume=filebrowser-data"
+      - "com.rag-system.backup=true"
+
+# Networks Configuration
+networks:
+  rag-network:
+    driver: bridge
+    name: rag-network
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+    labels:
+      - "com.rag-system.network=main"
+    driver_opts:
+      com.docker.network.bridge.name: rag-br0
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.bridge.host_binding_ipv4: "0.0.0.0"
+      com.docker.network.driver.mtu: "1500"
+
+# Global Configuration
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+    compress: "true"
+
+x-restart-policy: &default-restart-policy
+  restart: unless-stopped
+
+x-healthcheck-defaults: &default-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+x-labels: &default-labels
+  - "com.rag-system.project=rag-system"
+  - "com.rag-system.environment=${ENVIRONMENT:-production}"
+  - "com.rag-system.version=1.0"

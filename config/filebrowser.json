@@ -1,0 +1,31 @@
+{
+  "port": 80,
+  "baseURL": "",
+  "address": "",
+  "log": "stdout",
+  "database": "/database/filebrowser.db",
+  "root": "/srv",
+  "username": "admin",
+  "password": "admin",
+  "scope": "/srv",
+  "lockPassword": false,
+  "commands": [],
+  "shell": [],
+  "rules": [],
+  "branding": {
+    "name": "RAG System Files",
+    "disableExternal": false,
+    "files": "/static/img/icons/"
+  },
+  "frontend": {
+    "color": "#2196f3",
+    "darkMode": false,
+    "files": {
+      "hidden": [
+        ".DS_Store",
+        "Thumbs.db",
+        ".git"
+      ]
+    }
+  }
+}

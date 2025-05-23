@@ -1,0 +1,32 @@
+filebeat.inputs
+  - type log
+    enabled true
+    paths
+      - varlograg-system.log
+    fields
+      service rag-system
+      environment production
+
+  - type docker
+    enabled true
+    containers.ids
+      - 
+    processors
+      - add_docker_metadata
+          host unixvarrundocker.sock
+
+output.elasticsearch
+  hosts [elasticsearch9200]
+  index rag-system-logs-%{+yyyy.MM.dd}
+
+setup.template.enabled true
+setup.template.name rag-system
+setup.template.pattern rag-system-
+
+logging.level info
+logging.to_files true
+logging.files
+  path varlogfilebeat
+  name filebeat
+  keepfiles 7
+  permissions 0644

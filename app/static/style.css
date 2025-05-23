@@ -1,0 +1,86 @@
+/* Custom CSS for the RAG application */
+
+.main > div {
+    padding-top: 2rem;
+}
+
+.stAlert > div {
+    padding: 1rem;
+    border-radius: 0.5rem;
+}
+
+.chat-message {
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border-radius: 0.5rem;
+    border-left: 4px solid #00D4AA;
+}
+
+.user-message {
+    background-color: #f0f2f6;
+    border-left-color: #ff6b6b;
+}
+
+.assistant-message {
+    background-color: #ffffff;
+    border-left-color: #00D4AA;
+}
+
+.metric-container {
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    color: white;
+    margin: 0.5rem 0;
+}
+
+.sidebar .stSelectbox > div > div {
+    background-color: #f0f2f6;
+}
+
+.upload-area {
+    border: 2px dashed #cccccc;
+    border-radius: 0.5rem;
+    padding: 2rem;
+    text-align: center;
+    margin: 1rem 0;
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.status-online {
+    background-color: #00ff00;
+}
+
+.status-offline {
+    background-color: #ff0000;
+}
+
+/* Loading animations */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.loading {
+    animation: pulse 1.5s infinite;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .main > div {
+        padding: 1rem;
+    }
+    
+    .chat-message {
+        padding: 0.5rem;
+        margin: 0.25rem 0;
+    }
+}
